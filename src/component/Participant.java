@@ -5,15 +5,13 @@ import java.net.Socket;
 public class Participant {
     private final String id;
     private final String ip;
-    private int port;
     private Socket socket;
     private boolean isOnline;
     private long lastDisconnectedTime;
 
-    public Participant(String id, String ip, int port, Socket socket, boolean isOnline) {
+    public Participant(String id, String ip, Socket socket, boolean isOnline) {
         this.id = id;
         this.ip = ip;
-        this.port = port;
         this.socket = socket;
         this.isOnline = isOnline;
     }
@@ -26,10 +24,6 @@ public class Participant {
         return ip;
     }
 
-    public int getPort() {
-        return port;
-    }
-
     public Socket getSocket() {
         return socket;
     }
@@ -40,10 +34,6 @@ public class Participant {
 
     public long getLastDisconnectedTime() {
         return lastDisconnectedTime;
-    }
-
-    public void setPort(int port) {
-        this.port = port;
     }
 
     public void setSocket(Socket socket) {

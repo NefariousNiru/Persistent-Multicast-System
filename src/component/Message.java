@@ -11,6 +11,12 @@ public class Message {
         this.timestamp = System.currentTimeMillis();
     }
 
+    public Message(String sender, String content, long timestamp) {
+        this.sender = sender;
+        this.content = content;
+        this.timestamp = timestamp;
+    }
+
     public String getSender() {
         return sender;
     }

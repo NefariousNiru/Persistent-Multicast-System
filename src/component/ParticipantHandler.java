@@ -1,6 +1,8 @@
 package component;
 
 import util.Constants;
+import util.Methods;
+import util.ParticipantHelper;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -16,11 +18,14 @@ public class ParticipantHandler implements Runnable {
     private final Socket socket;
     private final Map<String, Participant> participants;
     private final Map<String, Queue<Message>> pendingMessages;
+    private String userId;
+    private ParticipantHelper helper;
 
     public ParticipantHandler(Socket socket, Map<String, Participant> participants, Map<String, Queue<Message>> pendingMessages) {
         this.socket = socket;
         this.participants = participants;
         this.pendingMessages = pendingMessages;
+        this.userId = null;
     }
 
     @Override
@@ -29,174 +34,150 @@ public class ParticipantHandler implements Runnable {
                 BufferedReader in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
         ) {
-            out.println("ACK Connected to Coordinator");
+            helper = new ParticipantHelper(socket, out);
+            helper.sendAck("Connected to Coordinator");
 
             String message;
             while ((message = in.readLine()) != null) {
                 System.out.printf("Received: %s%n", message);
-                this.handleCommand(message, out);
+                this.handleCommand(message);
             }
 
         } catch (IOException e) {
-            System.out.printf(
-                    "Connection Error with Participant: %s%s%n",
-                    Constants.surroundColor(Constants.COLOR_GREEN, this.socket.getInetAddress().toString()),
-                    Constants.surroundColor(Constants.COLOR_RED, e.getMessage())
-            );
+            helper.logConnectionError(e, userId);
         } finally {
-            try {
-                this.socket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            helper.closeSocket();
         }
     }
 
-    private void handleCommand(String message, PrintWriter out) {
-        String[] parts = message.split(" ");
-        if (parts.length < 2) {
-            System.out.println("Invalid Command");
-            return;
-        }
-
+    private void handleCommand(String message) {
+        String[] parts = message.split(" ", 2);
         String command = parts[0].toUpperCase();
-        String id = parts[1];
+        String content = (parts.length > 1) ? parts[1].trim() : "";
 
-        switch (command) {
-            case "REGISTER":
-                this.register(parts, id, out);
-                break;
-            case "DEREGISTER":
-                this.deregister(id, out);
-                break;
-            case "DISCONNECT":
-                this.disconnect(id, out);
-                break;
-            case "RECONNECT":
-                if (this.reconnect(parts, id, out)) {
-                    this.deliverPendingMessages(id, out);
-                };
-                break;
-            case "MSEND":
-                this.sendMessage(message, id, out);
-            default:
-                out.println("ERROR Unknown command");
-        }
-    }
+        Methods method = Methods.fromString(command);
 
-    private void register(String[] parts, String id, PrintWriter out) {
-        if (parts.length < 3) {
-            out.println("ERROR REGISTER requires <id> <port>");
+        if (method == null) {
+            helper.sendError("Unknown command");
             return;
         }
 
-        int PORT = Integer.parseInt(parts[2]);
+        switch (method) {
+            case REGISTER -> register(content);
+            case DEREGISTER -> deregister();
+            case DISCONNECT -> disconnect();
+            case RECONNECT-> reconnect();
+            case MSEND -> sendMessage(content);
+        }
+    }
+
+    private void register(String id) {
+        if (userId != null) {
+            helper.sendError("Already registered as " + userId);
+            return;
+        }
 
         if (participants.containsKey(id)) {
-            out.println("ERROR Participant ID already registered");
+            helper.sendError("Participant ID already registered");
         } else {
-            participants.put(id, new Participant(id, socket.getInetAddress().getHostAddress(), PORT, socket, true));
-            out.println("ACK Registered as " + id);
+            this.userId = id;
+            participants.put(id, new Participant(id, socket.getInetAddress().getHostAddress(), socket, true));
+            helper.sendAck("Registered as " + id);
             System.out.println("Participant Registered: " + id);
         }
     }
 
-    private void deregister(String id, PrintWriter out) {
-        if (!participants.containsKey(id)) {
-            out.println("Particpant ID not found");
-        } else {
-            participants.remove(id);
-            out.println("ACK Deregistered " + id);
-            System.out.println("Participant Deregistered: " + id);
-        }
+    private void deregister() {
+        if (helper.isNotRegistered(userId)) return;
+
+        participants.remove(userId);
+        helper.sendAck("Deregistered " + userId);
+        System.out.println("Participant Deregistered: " + userId);
     }
 
-    private void disconnect(String id, PrintWriter out) {
-        if (!participants.containsKey(id)) {
-            out.println("ERROR Participant ID not found");
-        } else {
-            participants.get(id).setOnline(false);
-            participants.get(id).setLastDisconnectedTime(System.currentTimeMillis());
-            out.println("ACK Disconnected " + id);
-            System.out.println("Participant Disconnected: " + id);
-        }
+    private void disconnect() {
+        if (helper.isNotRegistered(userId)) return;
+
+        participants.get(userId).setOnline(false);
+        participants.get(userId).setLastDisconnectedTime(System.currentTimeMillis());
+        helper.sendAck("Disconnected");
+        System.out.println("Participant Disconnected: " + userId);
     }
 
-    private boolean reconnect(String[] parts, String id, PrintWriter out) {
-        if (parts.length < 3) {
-            out.println("ERROR RECONNECT requires <id> <port>");
-            return false;
-        }
+    private void reconnect() {
+        if (helper.isNotRegistered(userId)) return;
 
-        int newPort = Integer.parseInt(parts[2]);
-        if (!participants.containsKey(id)) {
-            out.println("ERROR Participant ID not found. Please REGISTER again.");
-            return false;
-        } else {
-            Participant participant = participants.get(id);
-            long offlineTime = (System.currentTimeMillis() - participant.getLastDisconnectedTime()) / 1000;
-
-            if (offlineTime > Constants.TEMPORAL_BOUND_SECONDS) {
-                out.println("ERROR Reconnection time exceeded. Please REGISTER again.");
-                participants.remove(id);
-                System.out.println("Participant " + id + " removed due to expired reconnection.");
-            } else {
-                participant.setOnline(true);
-                participant.setSocket(socket);
-                participant.setPort(newPort);
-                out.println("ACK Reconnected as " + id);
-                System.out.println("Participant Reconnected: " + id);
-            }
-        }
-        return true;
-    }
-
-    private void sendMessage(String message, String id, PrintWriter out) {
-        if (!participants.containsKey(id)) {
-            out.println("ERROR You must REGISTER first");
+        Participant participant = participants.get(userId);
+        if (participant == null || participant.getSocket() == null) {
+            helper.sendError("Cannot reconnect, please REGISTER again.");
             return;
         }
 
-        String content = message.substring(6).trim();
-        Message msg = new Message(id, content);
-        this.broadcastMessage(msg, id);
-        out.println("ACK Message Sent");
+        long offlineTime = (System.currentTimeMillis() - participant.getLastDisconnectedTime()) / 1000;
+        if (offlineTime > Constants.TEMPORAL_BOUND_SECONDS) {
+            helper.sendError("Reconnection time exceeded. Please REGISTER again.");
+            participants.remove(userId);
+            System.out.println("Participant " + userId + " removed due to expired reconnection.");
+        } else {
+            participant.setOnline(true);
+            participant.setSocket(socket);
+            helper.sendAck("Reconnected");
+            System.out.println("Participant Reconnected: " + userId);
+            deliverPendingMessages(participant);
+        }
     }
 
-    private void broadcastMessage(Message msg, String senderId) {
-        long now = System.currentTimeMillis();
+    private void sendMessage(String content) {
+        if (helper.isNotRegistered(userId)) return;
+        if (content.isEmpty()) {
+            helper.sendError("Message cannot be empty");
+            return;
+        }
 
-        for (Map.Entry<String, Participant> entry: participants.entrySet()) {
-            String participantId = entry.getKey();
+        Message msg = new Message(userId, content);
+        broadcastMessage(msg);
+        helper.sendAck("Message Sent");
+    }
+
+    private void broadcastMessage(Message msg) {
+        for (Map.Entry<String, Participant> entry : participants.entrySet()) {
             Participant participant = entry.getValue();
 
             if (participant.isOnline()) {
                 try {
                     PrintWriter participantOut = new PrintWriter(participant.getSocket().getOutputStream(), true);
-                    participantOut.println("MSG " + senderId + ": " + msg.getContent());
+                    String ack = Constants.surroundColor(Constants.COLOR_BLUE, "MSG " + userId +": ");
+                    participantOut.println(ack + msg.getContent());
                 } catch (IOException e) {
-                    System.out.println("Error sending message to " + participantId);
+                    helper.logError("Error sending message to " + participant.getId(), e);
                 }
             } else {
-                pendingMessages.putIfAbsent(participantId, new ConcurrentLinkedQueue<>());
-                pendingMessages.get(participantId).add(msg);
+                pendingMessages.putIfAbsent(participant.getId(), new ConcurrentLinkedQueue<>());
+                pendingMessages.get(participant.getId()).add(msg);
             }
         }
     }
 
-    private void deliverPendingMessages(String participantId, PrintWriter out) {
-        Queue<Message> messages = pendingMessages.get(participantId);
-        if (messages != null) {
+    private void deliverPendingMessages(Participant participant) {
+        Queue<Message> messages = pendingMessages.get(userId);
+        if (messages == null || messages.isEmpty()) return;
+
+        try (PrintWriter participantOut = new PrintWriter(participant.getSocket().getOutputStream(), true)) {
             long now = System.currentTimeMillis();
             while (!messages.isEmpty()) {
                 Message msg = messages.peek();
-                if ((now - msg.getTimestamp()) / 1000 > Constants.TEMPORAL_BOUND_SECONDS) {
+                // Remove expired or null messages
+                if (msg == null || (now - msg.getTimestamp()) / 1000 > Constants.TEMPORAL_BOUND_SECONDS) {
                     messages.poll();
-                } else {
-                    out.println("MSG " + msg.getSender() + ": " + msg.getContent());
-                    messages.poll();
+                    continue;
                 }
+                String message = Constants.surroundColor(Constants.COLOR_BLUE, "MSG " + userId +": ") + msg.getContent();
+                participantOut.println(message);
+                messages.poll(); // Remove after sending
             }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+        pendingMessages.remove(userId);
     }
 }

@@ -8,6 +8,7 @@ public class Constants {
     public static final int PORT = 9000;
     public static final int THREAD_POOL_SIZE = (2 * Runtime.getRuntime().availableProcessors()) + 4;
     public static final int TEMPORAL_BOUND_SECONDS = 30;  // 1-day
+    public static final String MESSAGE_LOG_FILE_PATH = "messages.log";
 
     public static String surroundColor(String color, String message) {
         return color + message + COLOR_RESET;
