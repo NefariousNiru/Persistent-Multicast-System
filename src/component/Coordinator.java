@@ -6,14 +6,13 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 
 public class Coordinator {
     private int PORT;
-    private final ConcurrentHashMap<String, ParticipantInfo> participants = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Participant> participants = new ConcurrentHashMap<>();
 
 
     public Coordinator(int port) {

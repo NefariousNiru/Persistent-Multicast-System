@@ -2,14 +2,15 @@ package component;
 
 import java.net.Socket;
 
-public class ParticipantInfo {
+public class Participant {
     private final String id;
     private final String ip;
-    private final int port;
-    private final Socket socket;
+    private int port;
+    private Socket socket;
     private boolean isOnline;
+    private long lastDisconnectedTime;
 
-    public ParticipantInfo(String id, String ip, int port, Socket socket, boolean isOnline) {
+    public Participant(String id, String ip, int port, Socket socket, boolean isOnline) {
         this.id = id;
         this.ip = ip;
         this.port = port;
@@ -37,7 +38,23 @@ public class ParticipantInfo {
         return isOnline;
     }
 
+    public long getLastDisconnectedTime() {
+        return lastDisconnectedTime;
+    }
+
+    public void setPort(int port) {
+        this.port = port;
+    }
+
+    public void setSocket(Socket socket) {
+        this.socket = socket;
+    }
+
     public void setOnline(boolean online) {
         isOnline = online;
+    }
+
+    public void setLastDisconnectedTime(long lastDisconnectedTime) {
+        this.lastDisconnectedTime = lastDisconnectedTime;
     }
 }

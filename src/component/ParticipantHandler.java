@@ -12,9 +12,9 @@ import java.util.Map;
 public class ParticipantHandler implements Runnable {
 
     private final Socket socket;
-    private final Map<String, ParticipantInfo> participants;
+    private final Map<String, Participant> participants;
 
-    public ParticipantHandler(Socket socket, Map<String, ParticipantInfo> participants) {
+    public ParticipantHandler(Socket socket, Map<String, Participant> participants) {
         this.socket = socket;
         this.participants = participants;
     }
@@ -23,9 +23,9 @@ public class ParticipantHandler implements Runnable {
     public void run() {
         try (
                 BufferedReader in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
-                PrintWriter out = new PrintWriter(socket.getOutputStream());
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
         ) {
-            System.out.println("ACK Connected to Coordinator");
+            out.println("ACK Connected to Coordinator");
 
             String message;
             while ((message = in.readLine()) != null) {
@@ -60,15 +60,16 @@ public class ParticipantHandler implements Runnable {
 
         switch (command) {
             case "REGISTER":
-                this.register(parts, id);
+                this.register(parts, id, out);
                 break;
             case "DEREGISTER":
-                this.deregister(id);
+                this.deregister(id, out);
                 break;
             case "DISCONNECT":
-                this.disconnect(id);
+                this.disconnect(id, out);
                 break;
             case "RECONNECT":
+                this.reconnect(parts, id, out);
                 break;
             case "MSEND":
                 break;
@@ -77,40 +78,69 @@ public class ParticipantHandler implements Runnable {
         }
     }
 
-    private void register(String[] parts, String id) {
+    private void register(String[] parts, String id, PrintWriter out) {
         if (parts.length < 3) {
-            System.out.println("ERROR REGISTER requires <id> <port>");
+            out.println("ERROR REGISTER requires <id> <port>");
             return;
         }
 
         int PORT = Integer.parseInt(parts[2]);
 
         if (participants.containsKey(id)) {
-            System.out.println("ERROR Participant ID already registered");
+            out.println("ERROR Participant ID already registered");
         } else {
-            participants.put(id, new ParticipantInfo(id, socket.getInetAddress().getHostAddress(), PORT, socket, true));
-            System.out.println("ACK Registered as " + id);
+            participants.put(id, new Participant(id, socket.getInetAddress().getHostAddress(), PORT, socket, true));
+            out.println("ACK Registered as " + id);
             System.out.println("Participant Registered: " + id);
         }
     }
 
-    private void deregister(String id) {
+    private void deregister(String id, PrintWriter out) {
         if (!participants.containsKey(id)) {
-            System.out.println("Particpant ID not found");
+            out.println("Particpant ID not found");
         } else {
             participants.remove(id);
-            System.out.println("ACK Deregistered " + id);
+            out.println("ACK Deregistered " + id);
             System.out.println("Participant Deregistered: " + id);
         }
     }
 
-    private void disconnect(String id) {
+    private void disconnect(String id, PrintWriter out) {
         if (!participants.containsKey(id)) {
-            System.out.println("ERROR Participant ID not found");
+            out.println("ERROR Participant ID not found");
         } else {
             participants.get(id).setOnline(false);
-            System.out.println("ACK Disconnected " + id);
+            participants.get(id).setLastDisconnectedTime(System.currentTimeMillis());
+            out.println("ACK Disconnected " + id);
             System.out.println("Participant Disconnected: " + id);
         }
+    }
+
+    private void reconnect(String[] parts, String id, PrintWriter out) {
+        if (parts.length < 3) {
+            out.println("ERROR RECONNECT requires <id> <port>");
+            return;
+        }
+
+        int newPort = Integer.parseInt(parts[2]);
+        if (!participants.containsKey(id)) {
+            System.out.println("ERROR Participant ID not found. Please REGISTER again.");
+        } else {
+            Participant participant = participants.get(id);
+            long offlineTime = (System.currentTimeMillis() - participant.getLastDisconnectedTime()) / 1000;
+
+            if (offlineTime > Constants.TEMPORAL_BOUND_SECONDS) {
+                out.println("ERROR Reconnection time exceeded. Please REGISTER again.");
+                participants.remove(id);
+                System.out.println("Participant " + id + " removed due to expired reconnection.");
+            } else {
+                participant.setOnline(true);
+                participant.setSocket(socket);
+                participant.setPort(newPort);
+                out.println("ACK Reconnected as " + id);
+                System.out.println("Participant Reconnected: " + id);
+            }
+        }
+
     }
 }
