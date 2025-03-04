@@ -8,15 +8,19 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class ParticipantHandler implements Runnable {
 
     private final Socket socket;
     private final Map<String, Participant> participants;
+    private final Map<String, Queue<Message>> pendingMessages;
 
-    public ParticipantHandler(Socket socket, Map<String, Participant> participants) {
+    public ParticipantHandler(Socket socket, Map<String, Participant> participants, Map<String, Queue<Message>> pendingMessages) {
         this.socket = socket;
         this.participants = participants;
+        this.pendingMessages = pendingMessages;
     }
 
     @Override
@@ -69,10 +73,12 @@ public class ParticipantHandler implements Runnable {
                 this.disconnect(id, out);
                 break;
             case "RECONNECT":
-                this.reconnect(parts, id, out);
+                if (this.reconnect(parts, id, out)) {
+                    this.deliverPendingMessages(id, out);
+                };
                 break;
             case "MSEND":
-                break;
+                this.sendMessage(message, id, out);
             default:
                 out.println("ERROR Unknown command");
         }
@@ -116,15 +122,16 @@ public class ParticipantHandler implements Runnable {
         }
     }
 
-    private void reconnect(String[] parts, String id, PrintWriter out) {
+    private boolean reconnect(String[] parts, String id, PrintWriter out) {
         if (parts.length < 3) {
             out.println("ERROR RECONNECT requires <id> <port>");
-            return;
+            return false;
         }
 
         int newPort = Integer.parseInt(parts[2]);
         if (!participants.containsKey(id)) {
-            System.out.println("ERROR Participant ID not found. Please REGISTER again.");
+            out.println("ERROR Participant ID not found. Please REGISTER again.");
+            return false;
         } else {
             Participant participant = participants.get(id);
             long offlineTime = (System.currentTimeMillis() - participant.getLastDisconnectedTime()) / 1000;
@@ -141,6 +148,55 @@ public class ParticipantHandler implements Runnable {
                 System.out.println("Participant Reconnected: " + id);
             }
         }
+        return true;
+    }
 
+    private void sendMessage(String message, String id, PrintWriter out) {
+        if (!participants.containsKey(id)) {
+            out.println("ERROR You must REGISTER first");
+            return;
+        }
+
+        String content = message.substring(6).trim();
+        Message msg = new Message(id, content);
+        this.broadcastMessage(msg, id);
+        out.println("ACK Message Sent");
+    }
+
+    private void broadcastMessage(Message msg, String senderId) {
+        long now = System.currentTimeMillis();
+
+        for (Map.Entry<String, Participant> entry: participants.entrySet()) {
+            String participantId = entry.getKey();
+            Participant participant = entry.getValue();
+
+            if (participant.isOnline()) {
+                try {
+                    PrintWriter participantOut = new PrintWriter(participant.getSocket().getOutputStream(), true);
+                    participantOut.println("MSG " + senderId + ": " + msg.getContent());
+                } catch (IOException e) {
+                    System.out.println("Error sending message to " + participantId);
+                }
+            } else {
+                pendingMessages.putIfAbsent(participantId, new ConcurrentLinkedQueue<>());
+                pendingMessages.get(participantId).add(msg);
+            }
+        }
+    }
+
+    private void deliverPendingMessages(String participantId, PrintWriter out) {
+        Queue<Message> messages = pendingMessages.get(participantId);
+        if (messages != null) {
+            long now = System.currentTimeMillis();
+            while (!messages.isEmpty()) {
+                Message msg = messages.peek();
+                if ((now - msg.getTimestamp()) / 1000 > Constants.TEMPORAL_BOUND_SECONDS) {
+                    messages.poll();
+                } else {
+                    out.println("MSG " + msg.getSender() + ": " + msg.getContent());
+                    messages.poll();
+                }
+            }
+        }
     }
 }

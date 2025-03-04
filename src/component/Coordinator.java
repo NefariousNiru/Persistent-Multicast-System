@@ -5,6 +5,7 @@ import util.Constants;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -13,7 +14,7 @@ import java.util.concurrent.Executors;
 public class Coordinator {
     private final int PORT;
     private final ConcurrentHashMap<String, Participant> participants = new ConcurrentHashMap<>();
-
+    private final ConcurrentHashMap<String, Queue<Message>> pendingMessages = new ConcurrentHashMap<>();
 
     public Coordinator(int port) {
         this.PORT = port;
@@ -28,7 +29,7 @@ public class Coordinator {
                 System.out.printf("New Participant Connected: %s%n", Constants.surroundColor(Constants.COLOR_GREEN, participantSocket.getInetAddress().toString()));
 
                 // Handle participant in a separate Thread from a ThreadPool
-                threadPool.execute(new ParticipantHandler(participantSocket, participants));
+                threadPool.execute(new ParticipantHandler(participantSocket, participants, pendingMessages));
             }
         } catch (IOException e) {
             System.out.println(e.getMessage());
