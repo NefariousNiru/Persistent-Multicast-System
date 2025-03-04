@@ -11,7 +11,7 @@ import java.util.concurrent.Executors;
 
 
 public class Coordinator {
-    private int PORT;
+    private final int PORT;
     private final ConcurrentHashMap<String, Participant> participants = new ConcurrentHashMap<>();
 
 
