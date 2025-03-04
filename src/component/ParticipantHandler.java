@@ -56,27 +56,61 @@ public class ParticipantHandler implements Runnable {
         }
 
         String command = parts[0].toUpperCase();
+        String id = parts[1];
+
         switch (command) {
             case "REGISTER":
-                if (parts.length < 3) {
-                    out.println("ERROR REGISTER requires <id> <port>");
-                    return;
-                }
-
-                String id = parts[1];
-                int PORT = Integer.parseInt(parts[2]);
-
-                if (participants.containsKey(id)) {
-                    out.println("ERROR Participant ID already registered");
-                } else {
-                    participants.put(id, new ParticipantInfo(id, socket.getInetAddress().getHostAddress(), PORT, socket));
-                    out.println("ACK Registered as " + id);
-                    System.out.println("Participant Registered: " + id);
-                }
+                this.register(parts, id);
                 break;
-
+            case "DEREGISTER":
+                this.deregister(id);
+                break;
+            case "DISCONNECT":
+                this.disconnect(id);
+                break;
+            case "RECONNECT":
+                break;
+            case "MSEND":
+                break;
             default:
                 out.println("ERROR Unknown command");
+        }
+    }
+
+    private void register(String[] parts, String id) {
+        if (parts.length < 3) {
+            System.out.println("ERROR REGISTER requires <id> <port>");
+            return;
+        }
+
+        int PORT = Integer.parseInt(parts[2]);
+
+        if (participants.containsKey(id)) {
+            System.out.println("ERROR Participant ID already registered");
+        } else {
+            participants.put(id, new ParticipantInfo(id, socket.getInetAddress().getHostAddress(), PORT, socket, true));
+            System.out.println("ACK Registered as " + id);
+            System.out.println("Participant Registered: " + id);
+        }
+    }
+
+    private void deregister(String id) {
+        if (!participants.containsKey(id)) {
+            System.out.println("Particpant ID not found");
+        } else {
+            participants.remove(id);
+            System.out.println("ACK Deregistered " + id);
+            System.out.println("Participant Deregistered: " + id);
+        }
+    }
+
+    private void disconnect(String id) {
+        if (!participants.containsKey(id)) {
+            System.out.println("ERROR Participant ID not found");
+        } else {
+            participants.get(id).setOnline(false);
+            System.out.println("ACK Disconnected " + id);
+            System.out.println("Participant Disconnected: " + id);
         }
     }
 }
